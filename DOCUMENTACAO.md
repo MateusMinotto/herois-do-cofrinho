@@ -137,54 +137,60 @@
         ┌──────▼──────────────────────▼──────┐
         │   Supabase (PostgreSQL + Auth)     │
         │   - 10 tabelas com RLS             │
-        │   - Triggers (handle_new_user)     │
-        │   - Funções (has_role,             │
-        │     can_access_child)              │
+        │   - Triggers (tratar_novo_usuario) │
+        │   - Funções (tem_papel,            │
+        │     pode_acessar_crianca)          │
         └────────────────────────────────────┘
 ```
 
 ### 4.2 Fluxo de autenticação e autorização
 
-1. **Cadastro público** (`/auth`): apenas perfis **Responsável** (e Admin via código de convite). O formulário de Responsável já permite cadastrar crianças vinculadas. O trigger `handle_new_user` cria `profiles` e `user_roles` automaticamente.
-2. **Login infantil**: criado exclusivamente pelo Responsável/Admin logado, via server function `createChildLogin` (`child-login.functions.ts`), que usa o cliente admin para criar o usuário Auth e vincular `children.user_id`. A revogação (`removeChildLogin`) exclui o usuário e desvincula.
-3. **Roteamento por perfil**: após login, `fetchPrimaryRole` (em `lib/auth.ts`) consulta `user_roles` e redireciona: Admin → `/admin`, Responsável → `/pais`, Criança → `/`.
+1. **Cadastro público** (`/auth`): apenas perfis **Responsável** (e Admin via código de convite). O formulário de Responsável já permite cadastrar crianças vinculadas. O trigger `tratar_novo_usuario` cria `perfis` e `usuario_papeis` automaticamente.
+2. **Login infantil**: criado exclusivamente pelo Responsável/Admin logado, via server function `createChildLogin` (`child-login.functions.ts`), que usa o cliente admin para criar o usuário Auth e vincular `criancas.usuario_id`. A revogação (`removeChildLogin`) exclui o usuário e desvincula.
+3. **Roteamento por perfil**: após login, `fetchPrimaryRole` (em `lib/auth.ts`) consulta `usuario_papeis` e redireciona: Admin → `/admin`, Responsável → `/pais`, Criança → `/`.
 4. **Guarda de rotas**: `src/routes/_authenticated/route.tsx` verifica a sessão em `beforeLoad` e redireciona para `/auth`.
-5. **RLS**: toda tabela possui políticas baseadas em `has_role()` e `can_access_child()`, garantindo que cada usuário veja apenas seus dados (ou os dos filhos vinculados).
+5. **RLS**: toda tabela possui políticas baseadas em `tem_papel()` e `pode_acessar_crianca()`, garantindo que cada usuário veja apenas seus dados (ou os dos filhos vinculados).
 
 ### 4.3 Multi-criança
 
 - Hook `useSelectedChild` (`lib/children.ts`) mantém a criança ativa e persiste a escolha no `localStorage`.
 - `ChildSelector` no header permite alternar entre crianças (visão do Responsável).
-- Todos os dados (tarefas, metas, conquistas, progresso educativo) são escopados por `child_id`.
+- Todos os dados (tarefas, metas, conquistas, progresso educativo) são escopados por `crianca_id`.
 
 ### 4.4 Sistema de tarefas, sprints e economia
 
-- **Kanban** (`_app.tarefas.tsx`): três colunas (A fazer / Fazendo / Concluída) com drag-and-drop para mouse e **botões de seta para dispositivos touch**.
-- **Sprints semanais** (`lib/sprints.ts`): começam segunda e terminam domingo. `ensureSprintForChild` (chamado no layout `_app.tsx` a cada acesso) cria o novo sprint quando necessário, fazendo **carryover** das tarefas únicas não concluídas e recriando tarefas recorrentes (diárias ganham `task_date` do dia; semanais, o primeiro dia da semana). Se a tarefa diária do dia não existir/não estiver concluída, uma nova é criada em "A fazer".
-- **Aprovação parental**: a criança move para "Concluída", mas a tarefa fica `approval = 'pending'`. O Responsável aprova (pontos creditados) ou rejeita (tarefa volta para "Fazendo"). Estorno automático se a tarefa for movida de volta antes da aprovação.
-- **Economia**: 1 ponto = R$ 0,50, exibido no `PiggyBank`. Pontos acumulam para resgate de recompensas cadastradas pelos pais.
+- **Kanban** (`_app.tarefas.tsx`): três colunas (`a_fazer` / `fazendo` / `concluida`) com drag-and-drop para mouse e **botões de seta para dispositivos touch**.
+- **Sprints semanais** (`lib/sprints.ts`): começam segunda (`semana_inicio`) e terminam domingo (`semana_fim`). `ensureSprintForChild` (chamado no layout `_app.tsx` a cada acesso) cria o novo sprint quando necessário, fazendo **carryover** das tarefas únicas não concluídas e recriando tarefas recorrentes (diárias ganham `data_tarefa` do dia; semanais, o primeiro dia da semana). Se a tarefa diária do dia não existir/não estiver concluída, uma nova é criada em "A fazer".
+- **Aprovação parental**: a criança move para "Concluída", mas a tarefa fica `aprovacao = 'pendente'`. O Responsável aprova (pontos creditados) ou rejeita (tarefa volta para "Fazendo"). Estorno automático se a tarefa for movida de volta antes da aprovação.
+- **Economia**: 1 ponto = R$ 0,50 (`criancas.valor_ponto`), exibido no `PiggyBank`. Pontos acumulam para resgate de recompensas cadastradas pelos pais.
 - **Histórico**: `_app.sprints.tsx` lista semanas anteriores com desempenho.
 
 ### 4.5 Jornada educativa e gamificação
 
-- Capítulos de história (escambo, moedas, dinheiro digital) com progresso persistido em `chapter_progress` por criança.
-- Quizzes com tentativas registradas em `quiz_attempts`.
-- Conquistas (`achievements`), metas de economia (`goals`), avatar personalizável e saudações dinâmicas ("Bem-vindo" para masculino/outros, "Bem-vinda" para feminino) via `useCurrentProfile` e campo `gender`.
+- Capítulos de história (escambo, moedas, dinheiro digital) com progresso persistido em `progresso_capitulos` por criança.
+- Quizzes com tentativas registradas em `tentativas_quiz`.
+- Conquistas (`conquistas`), metas de economia (`metas`), avatar personalizável e saudações dinâmicas ("Bem-vindo" para masculino/outros, "Bem-vinda" para feminino) via `useCurrentProfile` e campo `genero`.
 
 ### 4.6 Banco de dados (10 tabelas)
 
+Todas as tabelas, colunas, enums e funções do banco utilizam nomes em **português**.
+
 | Tabela | Finalidade |
 |---|---|
-| `profiles` | Dados do usuário (nome, gênero) |
-| `user_roles` | Papéis (admin/parent/child) — separada por segurança |
-| `children` | Crianças vinculadas a responsáveis (`parent_id`, `user_id`) |
-| `sprints` | Ciclos semanais por criança |
-| `tasks` | Tarefas (status, `sprint_id`, `task_date`, `approval`, pontos) |
-| `rewards` | Recompensas resgatáveis por pontos |
-| `goals` | Metas de economia |
-| `achievements` | Conquistas desbloqueadas |
-| `chapter_progress` | Progresso na jornada educativa |
-| `quiz_attempts` | Tentativas e notas dos quizzes |
+| `perfis` | Dados do usuário (`nome_completo`, `genero`) |
+| `usuario_papeis` | Papéis (admin/responsavel/crianca) — separada por segurança |
+| `criancas` | Crianças vinculadas a responsáveis (`responsavel_id`, `usuario_id`) |
+| `sprints` | Ciclos semanais por criança (`semana_inicio`, `semana_fim`) |
+| `tarefas` | Tarefas (`titulo`, `status`, `sprint_id`, `data_tarefa`, `aprovacao`, `pontos`) |
+| `recompensas` | Recompensas resgatáveis por pontos |
+| `metas` | Metas de economia (`alvo`, `atual`, `prazo`) |
+| `conquistas` | Conquistas desbloqueadas (`conquistada`, `conquistada_em`) |
+| `progresso_capitulos` | Progresso na jornada educativa (`capitulo_id`, `progresso`) |
+| `tentativas_quiz` | Tentativas e notas dos quizzes (`acertos`, `total`) |
+
+Enums em português: `papel_app` (`admin`, `responsavel`, `crianca`), `status_tarefa` (`a_fazer`, `fazendo`, `concluida`), `frequencia_tarefa` (`Única`, `Diária`, `Semanal`, `Mensal`) e `status_recompensa` (`Ativo`, `Solicitado`, `Entregue`).
+
+Funções do banco: `tem_papel()` e `obter_papel_usuario()` (verificação de papéis), `pode_acessar_crianca()` (autorização por criança), `tratar_novo_usuario()` (trigger de cadastro) e `atualizar_atualizado_em()` (trigger de timestamp).
 
 Todas com RLS habilitado, GRANTs explícitos e migrations versionadas em `supabase/migrations/`.
 
@@ -200,5 +206,5 @@ Todas com RLS habilitado, GRANTs explícitos e migrations versionadas em `supaba
 
 - Rotas em português, uma por seção, cada uma com `head()` próprio (SEO).
 - Tokens semânticos de cor em `styles.css` (sem cores hardcoded nos componentes).
-- Papéis nunca armazenados no perfil nem verificados no client para autorização — sempre via `user_roles` + funções `security definer` no banco.
+- Papéis nunca armazenados no perfil nem verificados no client para autorização — sempre via `usuario_papeis` + funções `security definer` no banco.
 - Validação de entrada com Zod tanto no client (formulários) quanto nas server functions.
